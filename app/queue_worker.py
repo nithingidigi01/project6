@@ -1,11 +1,10 @@
-﻿import os
-import redis
+﻿import redis
 from rq import Worker, Queue, Connection
 
 listen = ["linkedin"]
 
 redis_conn = redis.Redis(
-    host="localhost",
+    host="redis",
     port=6379,
     db=0
 )

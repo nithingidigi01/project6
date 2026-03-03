@@ -26,90 +26,94 @@ def human_type(page, text):
 # LOGIN VALIDATION
 # ============================================================
 
+from playwright.sync_api import sync_playwright
+from pathlib import Path
+import time
+from vnc_manager import VNCSession
+
+vnc = VNCSession()
+session = vnc.start()
+print("VNC URL:", session["url"])
+...
+vnc.stop()
+
+LINKEDIN_LOGIN = "https://www.linkedin.com/login"
+
+
 def validate_login(interactive=False, state_file=None):
 
     state_path = Path(state_file)
 
-    with sync_playwright() as p:
+    if interactive:
 
-        browser = p.chromium.launch(
-            headless=not interactive,
-            channel="chrome",
-            args=[
-                "--start-maximized",
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-        )
+        vnc_url = start_vnc_environment()
 
-        # =========================
-        # INTERACTIVE LOGIN
-        # =========================
-        if interactive:
+        print("VNC available at:", vnc_url)
+
+        with sync_playwright() as p:
+
+            browser = p.chromium.launch(
+                headless=False,
+                channel="chrome",
+                args=[
+                    "--start-maximized",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox"
+                ],
+                env={"DISPLAY": ":99"}
+            )
 
             context = browser.new_context(viewport=None)
             page = context.new_page()
 
-            page.goto(LINKEDIN_LOGIN, wait_until="domcontentloaded", timeout=60000)
+            page.goto(LINKEDIN_LOGIN, timeout=60000)
 
-            print("Waiting for manual LinkedIn login...")
+            print("Waiting for LinkedIn login...")
 
-            try:
-                # 🔥 EVENT-BASED WAIT (NO LOOP)
-                page.wait_for_url("**/feed/**", timeout=300000)
+            start = time.time()
+            login_success = False
 
-                # small stabilization for cookies/localStorage
-                time.sleep(2)
+            while time.time() - start < 300:
 
+                if "feed" in page.url:
+                    login_success = True
+                    break
+
+                time.sleep(1)
+
+            if login_success:
                 context.storage_state(path=str(state_path))
-                print("✅ Login state saved")
+                print("State saved")
 
-                browser.close()
-                return True
+            browser.close()
+            stop_vnc_environment()
 
-            except Exception:
-                print("❌ Login timeout")
-                browser.close()
-                return False
+            return login_success
 
-        # =========================
-        # SESSION VALIDATION
-        # =========================
-        else:
+    else:
+        # Normal headless validation
+        with sync_playwright() as p:
+
+            browser = p.chromium.launch(headless=True)
 
             if not state_path.exists():
                 browser.close()
                 return False
 
-            context = browser.new_context(
-                storage_state=str(state_path),
-                viewport=None
-            )
-
+            context = browser.new_context(storage_state=str(state_path))
             page = context.new_page()
 
             try:
-                page.goto(LINKEDIN_FEED, wait_until="domcontentloaded", timeout=60000)
-
-                # If redirected to login -> expired
-                if any(x in page.url.lower() for x in ["login", "checkpoint"]):
-                    browser.close()
-                    return False
-
-                # Light selector check only
+                page.goto("https://www.linkedin.com/feed/", timeout=60000)
                 page.wait_for_selector(
                     'nav[aria-label="Primary Navigation"]',
-                    timeout=8000
+                    timeout=10000
                 )
-
                 browser.close()
                 return True
-
             except Exception:
                 browser.close()
                 return False
-
 
 # ============================================================
 # POSTING
